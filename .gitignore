@@ -13,5 +13,5 @@ Thumbs.db
 *.crx
 *.zip
 
-# Examples (optional, but keep them if the user wants them in the repo)
-# examples/
+# Examples
+examples/
