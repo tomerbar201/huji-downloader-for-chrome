@@ -63,6 +63,12 @@ export class DownloadManager {
 
     /** @type {boolean} Whether a download session is active */
     this.isRunning = false;
+
+    /** @type {boolean} Whether a download session is active */
+    this.isRunning = false;
+
+    /** @type {boolean} Whether to organize into subfolders */
+    this.keepStructure = true; // <--- ADD THIS
   }
 
   /**
@@ -72,13 +78,17 @@ export class DownloadManager {
    * @param {Array<Object>} items - Array of { sectionTitle, name, url, type }
    * @returns {Promise<Object>} - Resolves when all downloads complete or are cancelled
    */
-  async start(courseName, items) {
+  async start(courseName, items, keepStructure = true) { // <--- UPDATE PARAMETERS
     // 1. Check if we are already downloading
     if (this.isRunning) {
       console.log('Already downloading! Ignoring this request.');
       return { success: false, error: 'Already downloading' };
     }
 
+    // 2. If not busy, proceed as usual
+    this.reset();
+    this.isRunning = true;
+    this.keepStructure = keepStructure;
     // 2. If not busy, proceed as usual
     this.reset();
     this.isRunning = true;
@@ -360,6 +370,11 @@ export class DownloadManager {
    * Format: MoodleDownloads/CourseName/SectionName/[SubFolder/]Filename
    */
   buildFilePath(courseName, ...parts) {
+    if (!this.keepStructure) {
+      // Return only the last part (the filename) to download directly to root
+      return sanitizePath(parts[parts.length - 1]);
+    }
+
     const cleanParts = [ROOT_FOLDER, sanitizePath(courseName), ...parts]
       .filter(Boolean)
       .map(p => sanitizePath(p));

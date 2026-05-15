@@ -206,14 +206,14 @@ async function handleStartDownload(payload, sendResponse) {
       return;
     }
 
-    const { courseName, items } = payload;
+    const { courseName, items, keepStructure = true } = payload;
 
     // Acknowledge the start immediately
     sendResponse({ success: true, error: null });
 
     // Run the download pipeline (this is fire-and-forget from the popup's perspective;
     // progress is reported via chrome.runtime.sendMessage broadcasts)
-    const result = await downloadManager.start(courseName, items);
+    const result = await downloadManager.start(courseName, items, keepStructure);
 
     // Store result in session storage for popup reconnection
     try {

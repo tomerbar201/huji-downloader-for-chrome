@@ -15,7 +15,7 @@
   /* ═══════════════════════════════════════════════════════
    * DOM REFERENCES
    * ═══════════════════════════════════════════════════════ */
-
+  
   const $ = (id) => document.getElementById(id);
 
   const stateLoading = $('state-loading');
@@ -28,6 +28,8 @@
 
   const btnGoMoodle = $('btn-go-moodle');
   const btnDownload = $('btn-download');
+    const keepStructureCb = $('keep-structure-checkbox'); // <--- ADD THIS
+
   const btnCancel = $('btn-cancel');
   const btnNewDownload = $('btn-new-download');
   const btnRetry = $('btn-retry');
@@ -83,6 +85,11 @@
    * ═══════════════════════════════════════════════════════ */
 
   async function init() {
+    // 0. Load user's folder structure preference
+      const prefs = await chrome.storage.local.get(['keepStructure']);
+      if (prefs.keepStructure !== undefined) {
+        keepStructureCb.checked = prefs.keepStructure;
+      }
     try {
       // 1. Bind events first so they are ready
       bindEvents();
@@ -510,6 +517,10 @@
         setTheme(isDark);
       });
     }
+    // Save folder structure preference on toggle
+    keepStructureCb.addEventListener('change', () => {
+      chrome.storage.local.set({ keepStructure: keepStructureCb.checked });
+    });
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -867,12 +878,12 @@
 
     showState('downloading');
     updateProgress(0, 0, selectedItems.length, 'Starting…', []);
-
     const response = await sendToBackground({
       action: 'START_DOWNLOAD',
       payload: {
         courseName: courseData.courseName,
         items: selectedItems,
+        keepStructure: keepStructureCb.checked // <--- ADD THIS
       },
     });
 
