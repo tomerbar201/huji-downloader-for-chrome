@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HUJI Moodle Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <!-- ═══════════════════════════════════════ -->
+    <!-- HEADER                                  -->
+    <!-- ═══════════════════════════════════════ -->
+    <header id="header">
+      <div class="header-content">
+        <img src="../../assets/icon-48.png" alt="Logo" class="header-logo" id="header-logo">
+        <div class="header-text">
+          <h1 id="header-title">Moodle Downloader</h1>
+          <span class="header-badge" id="header-badge">HUJI</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- STATE 1: LOADING                        -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="state-loading" class="state-panel active">
+      <div class="loading-spinner">
+        <div class="spinner-ring"></div>
+      </div>
+      <p class="loading-text">Scanning course page…</p>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- STATE 2: INVALID PAGE                   -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="state-invalid" class="state-panel">
+      <div class="empty-state">
+        <div class="empty-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+        </div>
+        <p class="empty-title">No Course Detected</p>
+        <p class="empty-desc">Navigate to a HUJI Moodle course page to start downloading materials.</p>
+        <button id="btn-go-moodle" class="btn btn-primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+            <polyline points="15 3 21 3 21 9"/>
+            <line x1="10" y1="14" x2="21" y2="3"/>
+          </svg>
+          Go to Moodle Dashboard
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- STATE 3: COURSE SELECTION               -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="state-selection" class="state-panel">
+      <div class="course-header">
+        <div class="course-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+        </div>
+        <div class="course-info">
+          <h2 id="course-name" class="course-name">Course Name</h2>
+          <span id="course-item-count" class="course-meta">0 items found</span>
+        </div>
+      </div>
+
+      <!-- Selection controls -->
+      <div class="selection-controls">
+        <label class="checkbox-wrapper" id="select-all-wrapper">
+          <input type="checkbox" id="select-all-checkbox">
+          <span class="checkmark"></span>
+          <span class="checkbox-label">Select All</span>
+        </label>
+        <span id="selection-count" class="selection-count">0 selected</span>
+      </div>
+
+      <!-- Sections list -->
+      <div id="sections-list" class="sections-list">
+        <!-- Dynamically populated -->
+      </div>
+
+      <!-- Download button -->
+      <div class="action-bar">
+        <button id="btn-download" class="btn btn-primary btn-download" disabled>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download Selected
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- STATE 4: DOWNLOADING                    -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="state-downloading" class="state-panel">
+      <div class="download-status">
+        <div class="download-header">
+          <div class="download-anim">
+            <div class="pulse-dot"></div>
+          </div>
+          <div class="download-info">
+            <h3 id="download-title" class="download-title">Downloading…</h3>
+            <p id="download-subtitle" class="download-subtitle">Preparing files</p>
+          </div>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+          </div>
+          <div class="progress-stats">
+            <span id="progress-text">0 / 0 files</span>
+            <span id="progress-percent">0%</span>
+          </div>
+        </div>
+
+        <!-- Current file -->
+        <div id="current-file-container" class="current-file">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+            <polyline points="13 2 13 9 20 9"/>
+          </svg>
+          <span id="current-file-name" class="current-file-name">—</span>
+        </div>
+
+        <!-- Errors log (collapsible) -->
+        <div id="errors-container" class="errors-container hidden">
+          <button id="toggle-errors" class="toggle-errors">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span id="errors-count">0 issues</span>
+            <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          <ul id="errors-list" class="errors-list hidden">
+            <!-- Dynamically populated -->
+          </ul>
+        </div>
+
+        <!-- Cancel button -->
+        <div class="action-bar">
+          <button id="btn-cancel" class="btn btn-danger">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            Cancel Download
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- STATE 5: COMPLETE                       -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="state-complete" class="state-panel">
+      <div class="complete-state">
+        <div class="complete-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+        <p class="complete-title" id="complete-title">Download Complete!</p>
+        <p class="complete-desc" id="complete-desc">0 files downloaded successfully.</p>
+        
+        <div id="complete-logs" class="complete-logs hidden">
+          <div class="log-section">
+            <button id="toggle-success" class="toggle-log toggle-success">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+              </svg>
+              <span>Successful (<span id="success-count-text">0</span>)</span>
+              <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            <ul id="success-list" class="log-list hidden"></ul>
+          </div>
+          <div class="log-section">
+            <button id="toggle-failed" class="toggle-log toggle-failed">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+              <span>Failed/Skipped (<span id="failed-count-text">0</span>)</span>
+              <svg class="chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            <ul id="failed-list" class="log-list hidden"></ul>
+          </div>
+        </div>
+
+        <div class="complete-actions">
+          <button id="btn-new-download" class="btn btn-secondary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            New Download
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- STATE 6: ERROR                          -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="state-error" class="state-panel">
+      <div class="error-state">
+        <div class="error-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+        </div>
+        <p class="error-title" id="error-title">Something went wrong</p>
+        <p class="error-desc" id="error-desc">An unexpected error occurred.</p>
+        <button id="btn-retry" class="btn btn-primary">Try Again</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+{
+  "extensionName": {
+    "message": "HUJI Moodle Downloader",
+    "description": "The display name of the extension."
+  },
+  "extensionDescription": {
+    "message": "Download all course materials from HUJI Moodle with one click. Automatically organizes files into folders by section.",
+    "description": "The description of the extension."
+  },
+  "popupTitle": {
+    "message": "Moodle Downloader",
+    "description": "Title shown in the popup header."
+  },
+  "invalidPage": {
+    "message": "Please navigate to a HUJI Moodle course page to use this tool.",
+    "description": "Shown when the extension is opened on a non-Moodle page."
+  },
+  "sessionExpired": {
+    "message": "Your Moodle session has expired. Please refresh the page and log in again.",
+    "description": "Shown when the session cookie is no longer valid."
+  },
+  "downloadComplete": {
+    "message": "All downloads complete!",
+    "description": "Shown when all files have been downloaded."
+  },
+  "selectAll": {
+    "message": "Select All",
+    "description": "Label for the select all checkbox."
+  },
+  "deselectAll": {
+    "message": "Deselect All",
+    "description": "Label for the deselect all action."
+  },
+  "startDownload": {
+    "message": "Download Selected",
+    "description": "Label for the download button."
+  },
+  "cancelDownload": {
+    "message": "Cancel",
+    "description": "Label for the cancel button."
+  },
+  "goToMoodle": {
+    "message": "Go to Moodle Dashboard",
+    "description": "Button text to navigate to Moodle."
+  }
+}

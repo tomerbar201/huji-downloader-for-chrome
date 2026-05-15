@@ -1,0 +1,17 @@
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Agent files
+.agents/
+
+# Chrome Extension artifacts
+*.crx
+*.zip
+
+# Examples (optional, but keep them if the user wants them in the repo)
+# examples/
