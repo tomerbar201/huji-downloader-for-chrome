@@ -19,49 +19,56 @@
 
   const $ = (id) => document.getElementById(id);
 
-  const stateLoading     = $('state-loading');
-  const stateInvalid     = $('state-invalid');
-  const stateSelection   = $('state-selection');
+  const stateLoading = $('state-loading');
+  const stateInvalid = $('state-invalid');
+  const stateSelection = $('state-selection');
   const stateDownloading = $('state-downloading');
-  const stateComplete    = $('state-complete');
-  const stateError       = $('state-error');
+  const stateComplete = $('state-complete');
+  const stateError = $('state-error');
+  const stateLibrary = $('state-library');
 
-  const btnGoMoodle     = $('btn-go-moodle');
-  const btnDownload     = $('btn-download');
-  const btnCancel       = $('btn-cancel');
-  const btnNewDownload  = $('btn-new-download');
-  const btnRetry        = $('btn-retry');
+  const btnGoMoodle = $('btn-go-moodle');
+  const btnDownload = $('btn-download');
+  const btnCancel = $('btn-cancel');
+  const btnNewDownload = $('btn-new-download');
+  const btnRetry = $('btn-retry');
+  const btnMyCourses = $('btn-my-courses');
+  const btnLibraryGoMoodle = $('btn-library-go-moodle');
 
-  const courseNameEl     = $('course-name');
-  const courseItemCount  = $('course-item-count');
-  const selectAllCb     = $('select-all-checkbox');
-  const selectionCount  = $('selection-count');
-  const sectionsList    = $('sections-list');
+  const libraryList = $('library-list');
+  const libraryCourseCount = $('library-course-count');
+  const libraryEmpty = $('library-empty');
 
-  const progressFill    = $('progress-fill');
-  const progressText    = $('progress-text');
+  const courseNameEl = $('course-name');
+  const courseItemCount = $('course-item-count');
+  const selectAllCb = $('select-all-checkbox');
+  const selectionCount = $('selection-count');
+  const sectionsList = $('sections-list');
+
+  const progressFill = $('progress-fill');
+  const progressText = $('progress-text');
   const progressPercent = $('progress-percent');
-  const downloadTitle   = $('download-title');
+  const downloadTitle = $('download-title');
   const downloadSubtitle = $('download-subtitle');
   const currentFileName = $('current-file-name');
 
   const errorsContainer = $('errors-container');
-  const errorsCount     = $('errors-count');
-  const errorsList      = $('errors-list');
+  const errorsCount = $('errors-count');
+  const errorsList = $('errors-list');
   const toggleErrorsBtn = $('toggle-errors');
 
-  const completeTitle   = $('complete-title');
-  const completeDesc    = $('complete-desc');
-  const completeLogs    = $('complete-logs');
+  const completeTitle = $('complete-title');
+  const completeDesc = $('complete-desc');
+  const completeLogs = $('complete-logs');
   const toggleSuccessBtn = $('toggle-success');
-  const successList     = $('success-list');
+  const successList = $('success-list');
   const successCountText = $('success-count-text');
   const toggleFailedBtn = $('toggle-failed');
-  const failedList      = $('failed-list');
+  const failedList = $('failed-list');
   const failedCountText = $('failed-count-text');
 
-  const errorTitle      = $('error-title');
-  const errorDesc       = $('error-desc');
+  const errorTitle = $('error-title');
+  const errorDesc = $('error-desc');
 
   /* ═══════════════════════════════════════════════════════
    *  STATE
@@ -70,55 +77,78 @@
   let courseData = null;    // Parsed course data from content script
   let allItems = [];        // Flat list of all selectable items (with sectionTitle)
   let selectedIds = new Set();
+  let currentActiveState = 'loading';
 
   /* ═══════════════════════════════════════════════════════
    *  INITIALIZATION
    * ═══════════════════════════════════════════════════════ */
 
   async function init() {
-    // 1. הכנת הממשק הראשונית
-    showState('loading');
-    bindEvents();
+    try {
+      // 1. Bind events first so they are ready
+      bindEvents();
 
-    // 2. בדיקה: האם יש הורדה שרצה כרגע ברקע?
-    const status = await sendToBackground({ action: 'GET_STATUS' }).catch(() => null);
-    if (status?.isRunning) {
-      showState('downloading');
-      updateProgress(status.downloaded, status.skipped, status.total, '', status.errors || []);
-      return; // עוצרים כאן אם יש הורדה פעילה
+      // 2. Check: Is there a download currently running in the background?
+      const status = await sendToBackground({ action: 'GET_STATUS' }).catch(() => null);
+      if (status?.isRunning) {
+        showState('downloading');
+        updateProgress(status.downloaded, status.skipped, status.total, '', status.errors || []);
+        return;
+      }
+
+      // 3. Check: Is there a previous download result that hasn't been shown?
+      let lastRes = null;
+      try {
+        const storage = await chrome.storage.session.get('lastDownloadResult');
+        lastRes = storage.lastDownloadResult;
+      } catch (e) {
+        console.warn('[Popup] Session storage not available:', e);
+      }
+
+      if (lastRes) {
+        handleStateChange({
+          state: lastRes.cancelled ? 'CANCELLED' : 'COMPLETE',
+          ...lastRes
+        });
+        return;
+      }
+
+      // 4. Default: Decide whether to scan current page or show Library
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = tabs && tabs.length > 0 ? tabs[0] : null;
+      const url = tab?.url || '';
+      const isMoodle = url.includes('moodle.huji.ac.il') || url.includes('moodle4.cs.huji.ac.il');
+
+      if (isMoodle && tab) {
+        showState('loading');
+        const isOnCoursePage = await scanCurrentTab(tab);
+        if (!isOnCoursePage) {
+          renderLibrary();
+        }
+      } else {
+        renderLibrary();
+      }
+    } catch (err) {
+      console.error('[Popup] Critical Init Error:', err);
+      showError('Initialization Error', 'The extension encountered an error while starting. Please try refreshing the page.');
     }
-
-    // 3. בדיקה: האם יש תוצאה של הורדה קודמת שטרם הוצגה?
-    const storage = await chrome.storage.session.get('lastDownloadResult').catch(() => ({}));
-    const lastRes = storage.lastDownloadResult;
-    
-    if (lastRes) {
-      handleStateChange({
-        state: lastRes.cancelled ? 'CANCELLED' : 'COMPLETE',
-        ...lastRes
-      });
-      return; // עוצרים כאן אם הצגנו תוצאה שמורה
-    }
-
-    // 4. ברירת מחדל: אם אין כלום ברקע, סרוק את העמוד הנוכחי
-    await scanCurrentTab();
   }
+
   /**
    * Inject the content script into the active tab and request course data.
+   * Returns true if a course was successfully detected and UI moved to selection.
    */
-  async function scanCurrentTab() {
+  async function scanCurrentTab(existingTab = null) {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = existingTab || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
       if (!tab || !tab.id) {
-        showState('invalid');
-        return;
+        return false;
       }
 
       // Check URL first
       const url = tab.url || '';
       if (!url.includes('moodle.huji.ac.il') && !url.includes('moodle4.cs.huji.ac.il')) {
-        showState('invalid');
-        return;
+        return false;
       }
 
       // Inject content script dynamically
@@ -136,84 +166,96 @@
       await sleep(200);
 
       // Request course data from content script
+      // 3. Send message to content script
       const response = await new Promise((resolve) => {
+        // Set a timeout in case the content script doesn't respond
+        const timeout = setTimeout(() => {
+          console.warn('[Popup] PARSE_COURSE message timed out');
+          resolve({ success: false, error: 'TIMEOUT', message: 'The page is taking too long to respond. Try refreshing.' });
+        }, 8000);
+
         chrome.tabs.sendMessage(tab.id, { action: 'PARSE_COURSE' }, (resp) => {
+          clearTimeout(timeout);
           if (chrome.runtime.lastError) {
-            resolve({ success: false, error: chrome.runtime.lastError.message });
+            console.error('[Popup] sendMessage error:', chrome.runtime.lastError.message);
+            resolve({ success: false, error: 'CONNECTION_ERROR', message: chrome.runtime.lastError.message });
           } else {
-            resolve(resp || { success: false, error: 'No response' });
+            resolve(resp || { success: false, error: 'NO_RESPONSE' });
           }
         });
       });
 
-    if (!response.success) {
-      if (response.error === 'NOT_MOODLE_PAGE') {
-        showState('invalid');
+      if (!response.success) {
+        if (response.error === 'NOT_MOODLE_PAGE') {
+          return false;
+        } else {
+          showError('Parsing Error', response.error || 'Could not read the course page.');
+          return true; // We are on Moodle but error happened
+        }
+      }
+
+      courseData = response.data;
+
+      // Maintenance of reverse logic from Conversation 51b39d53
+      if (courseData && courseData.sections) {
+        courseData.sections.reverse();
+      }
+
+      if (!courseData || !courseData.sections || courseData.sections.length === 0) {
+        showError('No Materials Found', 'This course page has no downloadable materials.');
+        return true;
+      }
+
+      // ==========================================
+      // STALE-WHILE-REVALIDATE (SWR) LOGIC
+      // ==========================================
+      const cachedItems = await getCourseFromDB(courseData.courseName);
+
+      if (cachedItems && cachedItems.length > 0) {
+        // --- FAST PATH (Cache Hit) ---
+        console.log('[SWR] Cache hit! Loading UI instantly.');
+
+        allItems = cachedItems;
+        // Re-map UIDs and select all by default
+        let uid = 0;
+        allItems.forEach(item => { item.uid = uid++; });
+        selectedIds = new Set(allItems.map(i => i.uid));
+
+        await enrichItemsWithStatus(); // Check download status via Chrome API
+        renderCourseInfo();
+        renderSections();
+        showState('selection');
+
+        // Trigger background validation to check for updates
+        performGhostScan();
+
       } else {
-        showError('Parsing Error', response.error || 'Could not read the course page.');
-      }
-      return;
-    }
+        // --- SLOW PATH (First time visit) ---
+        console.log('[SWR] No cache. Scanning folders from scratch...');
+        buildItemsList();
+        await scanSubItems(); // Deep scan of Moodle folders (time-intensive)
+        flattenItems();
 
-    courseData = response.data;
+        if (allItems.length === 0) {
+          showError('No Materials Found', 'This course page has no downloadable files.');
+          return true;
+        }
 
-    // Maintenance of reverse logic from Conversation 51b39d53
-    if (courseData && courseData.sections) {
-      courseData.sections.reverse();
-    }
+        await saveCourseToDB(courseData.courseName, allItems);
 
-    if (!courseData || !courseData.sections || courseData.sections.length === 0) {
-      showError('No Materials Found', 'This course page has no downloadable materials.');
-      return;
-    }
-
-    // ==========================================
-    // STALE-WHILE-REVALIDATE (SWR) LOGIC
-    // ==========================================
-    const cachedItems = await getCourseFromDB(courseData.courseName);
-
-    if (cachedItems && cachedItems.length > 0) {
-      // --- FAST PATH (Cache Hit) ---
-      console.log('[SWR] Cache hit! Loading UI instantly.');
-      
-      allItems = cachedItems;
-      // Re-map UIDs and select all by default
-      let uid = 0;
-      allItems.forEach(item => { item.uid = uid++; });
-      selectedIds = new Set(allItems.map(i => i.uid));
-
-      await enrichItemsWithStatus(); // Check download status via Chrome API
-      renderCourseInfo();
-      renderSections();
-      showState('selection');
-
-      // Trigger background validation to check for updates
-      performGhostScan(); 
-
-    } else {
-      // --- SLOW PATH (First time visit) ---
-      console.log('[SWR] No cache. Scanning folders from scratch...');
-      buildItemsList();
-      await scanSubItems(); // Deep scan of Moodle folders (time-intensive)
-      flattenItems();
-
-      if (allItems.length === 0) {
-        showError('No Materials Found', 'This course page has no downloadable files.');
-        return;
+        await enrichItemsWithStatus();
+        renderCourseInfo();
+        renderSections();
+        syncCheckboxes();
+        showState('selection');
       }
 
-      await saveCourseToDB(courseData.courseName, allItems);
-      
-      await enrichItemsWithStatus();
-      renderCourseInfo();
-      renderSections();
-      syncCheckboxes(); 
-      showState('selection');
-    }
+      return true;
 
     } catch (err) {
       console.error('[Popup] Init error:', err);
       showError('Connection Error', 'Could not connect to the Moodle page. Try refreshing.');
+      return false;
     }
   }
 
@@ -223,7 +265,7 @@
    */
   async function performGhostScan() {
     console.log('[SWR] Starting ghost scan in background...');
-    
+
     const currentUrls = new Set(allItems.map(item => item.url));
     let tempItems = [];
     let tempUid = 0;
@@ -245,7 +287,7 @@
     }
 
     // Deep scan sub-items for the temporary array
-    await scanSubItemsForArray(tempItems); 
+    await scanSubItemsForArray(tempItems);
 
     // Flatten the results
     const freshItems = [];
@@ -277,7 +319,7 @@
 
     if (foundNewFiles) {
       console.log('[SWR] Found NEW files! Updating UI silently.');
-      
+
       // Preserve current user selections
       const selectionMap = new Map();
       allItems.forEach(item => {
@@ -285,14 +327,14 @@
       });
 
       await saveCourseToDB(courseData.courseName, freshItems);
-      
+
       allItems = freshItems;
       let newUid = 0;
       selectedIds = new Set();
 
       allItems.forEach(item => {
         item.uid = newUid++;
-        
+
         // Restore selection or select if it's a newly discovered file
         if (selectionMap.has(item.url)) {
           if (selectionMap.get(item.url)) {
@@ -303,9 +345,9 @@
           selectedIds.add(item.uid);
         }
       });
-      
+
       await enrichItemsWithStatus(); // This also unselects already-downloaded items
-      
+
       renderCourseInfo();
       renderSections();
       syncCheckboxes();
@@ -314,31 +356,43 @@
     }
   }
 
+
   /**
    * Helper: Scans sub-items for a specific array without mutating global state
    */
   async function scanSubItemsForArray(itemsArray) {
-    const targets = itemsArray.filter(item => 
+    const targets = itemsArray.filter(item =>
       (item.type === 'folder' || item.type === 'assign') && item.scanningStatus === 'none'
     );
 
     if (targets.length === 0) return;
 
-    for (const item of targets) {
+    // הגדרת גודל המנה לסריקה מקבילית
+    const CONCURRENCY_LIMIT = 5;
+
+    for (let i = 0; i < targets.length; i += CONCURRENCY_LIMIT) {
+      const batch = targets.slice(i, i + CONCURRENCY_LIMIT);
+
       try {
+        // שולחים את כל המנה לפענוח ברקע בבקשה אחת
         const response = await sendToBackground({
           action: 'RESOLVE_RESOURCES',
-          payload: { items: [{ url: item.url, name: item.name, type: item.type }] }
+          payload: {
+            items: batch.map(item => ({ url: item.url, name: item.name, type: item.type }))
+          }
         });
 
-        if (response.success && response.results && response.results[0]) {
-          const res = response.results[0];
-          if (res.type === 'folder' || res.type === 'assign') {
-            item.subFiles = res.files || [];
-          }
+        // ממפים את התשובות חזרה לפריטים במערך
+        if (response.success && response.results) {
+          response.results.forEach((res, index) => {
+            const item = batch[index];
+            if (res.type === 'folder' || res.type === 'assign') {
+              item.subFiles = res.files || [];
+            }
+          });
         }
       } catch (err) {
-        console.warn('[SWR] Sub-item scan failed:', err);
+        console.warn('[SWR] Sub-item batch scan failed:', err);
       }
     }
   }
@@ -353,6 +407,26 @@
       chrome.tabs.create({ url: 'https://moodle.huji.ac.il/2025-26/my/' });
       window.close();
     });
+
+    btnLibraryGoMoodle.addEventListener('click', () => {
+      chrome.tabs.create({ url: 'https://moodle.huji.ac.il/2025-26/my/' });
+      window.close();
+    });
+
+    // My Courses hub toggle
+    if (btnMyCourses) {
+      btnMyCourses.addEventListener('click', () => {
+        if (currentActiveState === 'library') {
+          // Switch back to course view if possible
+          showState('loading');
+          scanCurrentTab().then(found => {
+            if (!found) renderLibrary();
+          });
+        } else {
+          renderLibrary();
+        }
+      });
+    }
 
     // Select All
     selectAllCb.addEventListener('change', () => {
@@ -378,7 +452,7 @@
     // New Download
     btnNewDownload.addEventListener('click', async () => {
       if (chrome.storage && chrome.storage.session) {
-        try { await chrome.storage.session.remove('lastDownloadResult'); } catch (e) {}
+        try { await chrome.storage.session.remove('lastDownloadResult'); } catch (e) { }
       }
       showState('loading');
       scanCurrentTab();
@@ -387,7 +461,7 @@
     // Retry
     btnRetry.addEventListener('click', async () => {
       if (chrome.storage && chrome.storage.session) {
-        try { await chrome.storage.session.remove('lastDownloadResult'); } catch (e) {}
+        try { await chrome.storage.session.remove('lastDownloadResult'); } catch (e) { }
       }
       showState('loading');
       scanCurrentTab();
@@ -465,7 +539,7 @@
    * Runs during the 'loading' state.
    */
   async function scanSubItems() {
-    const targets = allItems.filter(item => 
+    const targets = allItems.filter(item =>
       (item.type === 'folder' || item.type === 'assign') && item.scanningStatus === 'none'
     );
 
@@ -474,35 +548,46 @@
     const loadingText = stateLoading.querySelector('.loading-text');
     const originalText = loadingText ? loadingText.textContent : 'Scanning course…';
 
-    // We process them one by one or in small batches to show progress
-    for (let i = 0; i < targets.length; i++) {
-      const item = targets[i];
+    // הגדרת גודל מנה - כמה תיקיות נסרוק במקביל
+    const CONCURRENCY_LIMIT = 5;
+
+    for (let i = 0; i < targets.length; i += CONCURRENCY_LIMIT) {
+      // חותכים "מנה" מתוך המערך
+      const batch = targets.slice(i, i + CONCURRENCY_LIMIT);
+
       if (loadingText) {
-        loadingText.textContent = `Scanning ${item.type === 'folder' ? 'folder' : 'assignment'} ${i + 1} of ${targets.length}…`;
+        loadingText.textContent = `Scanning items ${i + 1} to ${Math.min(i + CONCURRENCY_LIMIT, targets.length)} of ${targets.length}…`;
       }
 
-      item.scanningStatus = 'scanning';
+      // מסמנים את כולם כבסריקה
+      batch.forEach(item => item.scanningStatus = 'scanning');
 
       try {
+        // שולחים את כל המנה בבקשה אחת ל-Service Worker
         const response = await sendToBackground({
           action: 'RESOLVE_RESOURCES',
-          payload: { items: [{ url: item.url, name: item.name, type: item.type }] }
+          payload: {
+            items: batch.map(item => ({ url: item.url, name: item.name, type: item.type }))
+          }
         });
 
-        if (response.success && response.results && response.results[0]) {
-          const res = response.results[0];
-          if (res.type === 'folder' || res.type === 'assign') {
-            item.subFiles = res.files || [];
-            item.scanningStatus = 'done';
-          } else {
-            item.scanningStatus = 'error';
-          }
+        if (response.success && response.results) {
+          // ממפים את התוצאות חזרה לפריטים
+          response.results.forEach((res, index) => {
+            const item = batch[index];
+            if (res.type === 'folder' || res.type === 'assign') {
+              item.subFiles = res.files || [];
+              item.scanningStatus = 'done';
+            } else {
+              item.scanningStatus = 'error';
+            }
+          });
         } else {
-          item.scanningStatus = 'error';
+          batch.forEach(item => item.scanningStatus = 'error');
         }
       } catch (err) {
-        console.error('[Popup] Sub-item scan failed:', err);
-        item.scanningStatus = 'error';
+        console.error('[Popup] Sub-item batch scan failed:', err);
+        batch.forEach(item => item.scanningStatus = 'error');
       }
     }
 
@@ -551,7 +636,7 @@
    */
   async function enrichItemsWithStatus() {
     if (!courseData || allItems.length === 0) return;
-    
+
     // We only need to check items that are files (resource, folder, assign)
     const itemsToCheck = allItems.map(item => ({
       sectionTitle: item.sectionTitle,
@@ -730,6 +815,8 @@
    * ═══════════════════════════════════════════════════════ */
 
   function syncCheckboxes() {
+    if (!courseData || !courseData.sections) return;
+
     // Sync individual item checkboxes
     const itemCbs = sectionsList.querySelectorAll('input[data-uid]');
     for (const cb of itemCbs) {
@@ -784,7 +871,7 @@
     if (selectedIds.size === 0) return;
 
     if (chrome.storage && chrome.storage.session) {
-      try { await chrome.storage.session.remove('lastDownloadResult'); } catch (e) {}
+      try { await chrome.storage.session.remove('lastDownloadResult'); } catch (e) { }
     }
 
     // Gather selected items
@@ -857,21 +944,31 @@
         if (message.state === 'COMPLETE') {
           completeTitle.textContent = 'Download Complete!';
           completeDesc.textContent = `${message.downloaded} file${message.downloaded !== 1 ? 's' : ''} downloaded${message.skipped > 0 ? `, ${message.skipped} skipped` : ''}.`;
+
+          // Save course to history on success
+          if (courseData) {
+            saveCourseToHistory(
+              courseData.courseName,
+              courseData.courseUrl || '',
+              message.downloaded,
+              (courseData.sections || []).length
+            );
+          }
         } else {
           completeTitle.textContent = 'Download Cancelled';
           completeDesc.textContent = `${message.downloaded} file${message.downloaded !== 1 ? 's' : ''} were downloaded before cancellation.`;
         }
-        
+
         // Show logs if there are any
         const successes = message.successes || [];
         const errors = message.errors || [];
-        
+
         if (successes.length > 0 || errors.length > 0) {
           completeLogs.classList.remove('hidden');
-          
+
           successCountText.textContent = successes.length;
           failedCountText.textContent = errors.length;
-          
+
           successList.innerHTML = successes.map(s => `<li>${escapeHtml(s)}</li>`).join('');
           failedList.innerHTML = errors.map(e => `<li>${escapeHtml(e)}</li>`).join('');
         } else {
@@ -889,13 +986,113 @@
   }
 
   /* ═══════════════════════════════════════════════════════
+   *  LIBRARY MANAGEMENT
+   * ═══════════════════════════════════════════════════════ */
+
+  /**
+   * Fetch and render the list of previously scanned courses.
+   */
+  async function renderLibrary() {
+    showState('library');
+    libraryList.innerHTML = '';
+    libraryEmpty.classList.add('hidden');
+
+    const result = await chrome.storage.local.get(['courseHistory']);
+    const history = result.courseHistory || {};
+    const courses = Object.values(history).sort((a, b) => b.lastUpdated - a.lastUpdated);
+
+    libraryCourseCount.textContent = `${courses.length} course${courses.length !== 1 ? 's' : ''}`;
+
+    if (courses.length === 0) {
+      libraryEmpty.classList.remove('hidden');
+      return;
+    }
+
+    courses.forEach(course => {
+      const card = document.createElement('div');
+      card.className = 'mini-course-card';
+
+      const lastUpdateStr = new Date(course.lastUpdated).toLocaleDateString();
+
+      card.innerHTML = `
+        <div class="card-top">
+          <div class="library-course-icon">📘</div>
+          <div class="card-info">
+            <h3 class="card-title" dir="rtl">${escapeHtml(course.name)}</h3>
+            <span class="card-stats">${course.files} files • ${course.sections} sections • ${lastUpdateStr}</span>
+          </div>
+        </div>
+        <div class="card-actions">
+          <button class="btn-card btn-card-primary btn-open-folder" data-course="${escapeHtml(course.name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            Open Folder
+          </button>
+          <button class="btn-card btn-open-moodle" data-url="${escapeHtml(course.url)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+              <polyline points="15 3 21 3 21 9"/>
+              <line x1="10" y1="14" x2="21" y2="3"/>
+            </svg>
+            Moodle
+          </button>
+        </div>
+      `;
+
+      // Open Folder
+      card.querySelector('.btn-open-folder').addEventListener('click', () => {
+        sendToBackground({ action: 'OPEN_COURSE_FOLDER', payload: { courseName: course.name } });
+      });
+
+      // Open Moodle
+      card.querySelector('.btn-open-moodle').addEventListener('click', () => {
+        if (course.url) {
+          chrome.tabs.create({ url: course.url });
+        } else {
+          // Fallback if no URL
+          chrome.tabs.create({ url: 'https://moodle.huji.ac.il/' });
+        }
+      });
+
+      libraryList.appendChild(card);
+    });
+  }
+
+  /**
+   * Save a course to the history list in local storage.
+   */
+  async function saveCourseToHistory(courseName, courseUrl, filesCount, sectionsCount) {
+    const result = await chrome.storage.local.get(['courseHistory']);
+    let history = result.courseHistory || {};
+
+    // Update or add the course
+    history[courseName] = {
+      name: courseName,
+      url: courseUrl,
+      files: filesCount,
+      sections: sectionsCount,
+      lastUpdated: Date.now()
+    };
+
+    await chrome.storage.local.set({ courseHistory: history });
+  }
+
+  /* ═══════════════════════════════════════════════════════
    *  STATE MANAGEMENT
    * ═══════════════════════════════════════════════════════ */
 
   function showState(name) {
-    const panels = [stateLoading, stateInvalid, stateSelection, stateDownloading, stateComplete, stateError];
+    currentActiveState = name;
+    const panels = [
+      stateLoading, stateInvalid, stateSelection,
+      stateDownloading, stateComplete, stateError, stateLibrary
+    ];
+
     for (const p of panels) {
-      p.classList.remove('active');
+      if (p && p.classList) {
+        p.classList.remove('active');
+      }
     }
 
     const map = {
@@ -905,22 +1102,38 @@
       downloading: stateDownloading,
       complete: stateComplete,
       error: stateError,
+      library: stateLibrary
     };
 
     if (map[name]) {
       map[name].classList.add('active');
     }
 
+    // Update Header button text/icon based on state
+    if (btnMyCourses) {
+      const span = btnMyCourses.querySelector('span');
+      const svg = btnMyCourses.querySelector('svg');
+      if (span && svg) {
+        if (name === 'library') {
+          span.textContent = 'Back';
+          btnMyCourses.title = 'Back to scan current page';
+          svg.innerHTML = '<polyline points="15 18 9 12 15 6"/>'; // Chevron left
+        } else {
+          span.textContent = 'My Courses';
+          btnMyCourses.title = 'My Courses — view all scanned courses';
+          svg.innerHTML = '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'; // Home icon
+        }
+      }
+    }
+
     // Reset cancel button state
-    if (name === 'downloading') {
+    if (name === 'downloading' && btnCancel) {
       btnCancel.disabled = false;
       btnCancel.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/>
-          <line x1="15" y1="9" x2="9" y2="15"/>
-          <line x1="9" y1="9" x2="15" y2="15"/>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
         </svg>
-        Cancel Download
+        Cancel
       `;
     }
   }

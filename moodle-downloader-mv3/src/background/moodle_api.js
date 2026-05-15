@@ -120,46 +120,11 @@ function extractFileUrlFromHtml(html, baseUrl) {
 
 /**
  * Extract all file URLs from a Moodle folder page.
- * Folder pages contain multiple <a> links with pluginfile.php URLs
- * inside a folder tree structure.
- * 
- * Returns an array of { name: string, url: string }.
  */
 function extractFolderFiles(html, baseUrl) {
   const files = [];
   const seenUrls = new Set();
 
-  // Match all <a> tags with pluginfile.php hrefs within the folder content
-  const regex = /<a[^>]+href\s*=\s*["']([^"']*pluginfile\.php[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
-  let match;
-  while ((match = regex.exec(html)) !== null) {
-    const rawUrl = decodeHtmlEntities(match[1]);
-    const rawName = match[2].replace(/<[^>]*>/g, '').trim(); // Strip inner HTML tags
-
-    const absoluteUrl = resolveUrl(rawUrl, baseUrl);
-
-    if (!seenUrls.has(absoluteUrl) && rawName) {
-      seenUrls.add(absoluteUrl);
-      files.push({
-        name: sanitizeFilename(rawName),
-        url: absoluteUrl,
-      });
-    }
-  }
-
-  // Deduplicate: if forcedownload variant exists, prefer it
-  return files;
-}
-
-/**
- * Extract file URLs from an assignment page.
- * Assignments may have intro attachments and submission files.
- */
-function extractAssignmentFiles(html, baseUrl) {
-  const files = [];
-  const seenUrls = new Set();
-
-  // Look for file links in the intro/description area
   const regex = /<a[^>]+href\s*=\s*["']([^"']*pluginfile\.php[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
   while ((match = regex.exec(html)) !== null) {
@@ -176,7 +141,32 @@ function extractAssignmentFiles(html, baseUrl) {
       });
     }
   }
+  return files;
+}
 
+/**
+ * Extract file URLs from an assignment page.
+ */
+function extractAssignmentFiles(html, baseUrl) {
+  const files = [];
+  const seenUrls = new Set();
+
+  const regex = /<a[^>]+href\s*=\s*["']([^"']*pluginfile\.php[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let match;
+  while ((match = regex.exec(html)) !== null) {
+    const rawUrl = decodeHtmlEntities(match[1]);
+    const rawName = match[2].replace(/<[^>]*>/g, '').trim();
+
+    const absoluteUrl = resolveUrl(rawUrl, baseUrl);
+
+    if (!seenUrls.has(absoluteUrl) && rawName) {
+      seenUrls.add(absoluteUrl);
+      files.push({
+        name: sanitizeFilename(rawName),
+        url: absoluteUrl,
+      });
+    }
+  }
   return files;
 }
 
@@ -186,20 +176,13 @@ function extractAssignmentFiles(html, baseUrl) {
 
 /**
  * Main resolution function.
- * Fetches the given Moodle URL and determines how to download the file.
- * 
- * Returns: {
- *   type: 'direct' | 'resolved' | 'folder' | 'assign' | 'skipped' | 'error',
- *   files: [{ name: string, url: string }],
- *   error: string | null
- * }
  */
 export async function resolveResource(url, itemName, itemType) {
   try {
     const response = await fetch(url, {
       method: 'GET',
-      credentials: 'include',    // Send session cookies
-      redirect: 'follow',        // Follow 303 redirects to S3 etc.
+      credentials: 'include',
+      redirect: 'follow',
     });
 
     if (!response.ok) {
@@ -211,9 +194,8 @@ export async function resolveResource(url, itemName, itemType) {
 
     const contentType = (response.headers.get('content-type') || '').toLowerCase();
 
-    // Check if the response is a binary/file download
+    // Check if the response is a direct binary download
     if (isDirectDownload(contentType, response)) {
-      // Extract filename from Content-Disposition header if available
       const fileName = extractFilenameFromHeaders(response, itemName);
       return {
         type: 'direct',
@@ -225,12 +207,10 @@ export async function resolveResource(url, itemName, itemType) {
     // It's HTML — parse it
     const html = await response.text();
 
-    // Check for session expiry
     if (isLoginPage(html)) {
       return { type: 'error', files: [], error: 'SESSION_EXPIRED' };
     }
 
-    // Handle by module type
     if (itemType === 'folder') {
       const folderFiles = extractFolderFiles(html, url);
       if (folderFiles.length > 0) {
@@ -244,21 +224,27 @@ export async function resolveResource(url, itemName, itemType) {
       if (assignFiles.length > 0) {
         return { type: 'assign', files: assignFiles, error: null };
       }
-      // Assignments may not have downloadable files
       return { type: 'skipped', files: [], error: 'No downloadable files in assignment' };
     }
 
     // For resource and page types, extract single file URL
     const fileUrl = extractFileUrlFromHtml(html, url);
     if (fileUrl) {
+      let finalName = sanitizeFilename(itemName);
+      const ext = getExtensionFromUrl(fileUrl);
+
+      // If the pluginfile URL has an extension, and our UI name doesn't already end with it, append it
+      if (ext && !finalName.toLowerCase().endsWith(ext.toLowerCase())) {
+        finalName += ext;
+      }
+
       return {
         type: 'resolved',
-        files: [{ name: itemName, url: fileUrl }],
+        files: [{ name: finalName, url: fileUrl }],
         error: null,
       };
     }
 
-    // Page type: might not have a downloadable file, skip gracefully
     if (itemType === 'page') {
       return { type: 'skipped', files: [], error: 'Page content (no file to download)' };
     }
@@ -278,13 +264,11 @@ export async function resolveResource(url, itemName, itemType) {
  * Determine if a response is a direct binary download.
  */
 function isDirectDownload(contentType, response) {
-  // Check Content-Disposition header
   const disposition = response.headers.get('content-disposition');
   if (disposition && disposition.includes('attachment')) {
     return true;
   }
 
-  // Check content type against known binary types
   for (const binType of BINARY_CONTENT_TYPES) {
     if (contentType.includes(binType)) {
       return true;
@@ -297,14 +281,12 @@ function isDirectDownload(contentType, response) {
 /**
  * Extract the file extension from the server (headers or URL),
  * and always attach it to the Moodle UI name (fallbackName).
- * This prevents gibberish names caused by server encoding issues.
  */
 function extractFilenameFromHeaders(response, fallbackName) {
   const disposition = response.headers.get('content-disposition');
   let serverFilename = '';
 
   if (disposition) {
-    // Try: filename*=UTF-8''encoded_name
     const utf8Match = disposition.match(/filename\*\s*=\s*UTF-8''([^;\s]+)/i);
     if (utf8Match) {
       try {
@@ -312,20 +294,17 @@ function extractFilenameFromHeaders(response, fallbackName) {
       } catch { /* fall through */ }
     }
 
-    // Try: filename="name"
     if (!serverFilename) {
       const quotedMatch = disposition.match(/filename\s*=\s*"([^"]+)"/i);
       if (quotedMatch) serverFilename = quotedMatch[1];
     }
 
-    // Try: filename=name (unquoted)
     if (!serverFilename) {
       const unquotedMatch = disposition.match(/filename\s*=\s*([^;\s]+)/i);
       if (unquotedMatch) serverFilename = unquotedMatch[1];
     }
   }
 
-  // Try extracting from the final URL path if not in headers
   if (!serverFilename) {
     try {
       const urlObj = new URL(response.url);
@@ -334,7 +313,6 @@ function extractFilenameFromHeaders(response, fallbackName) {
     } catch { /* fall through */ }
   }
 
-  // Extract the extension (e.g., ".docx", ".pdf")
   let ext = '';
   if (serverFilename) {
     const extMatch = serverFilename.match(/\.([0-9a-z]+)$/i);
@@ -343,21 +321,37 @@ function extractFilenameFromHeaders(response, fallbackName) {
     }
   }
 
-  // Start with the clean UI name
   const cleanFallback = sanitizeFilename(fallbackName);
 
-  // If we couldn't find an extension, just return the UI name
   if (!ext) {
     return cleanFallback;
   }
 
-  // If the UI name already ends with the correct extension, return it as-is
   if (cleanFallback.toLowerCase().endsWith(ext.toLowerCase())) {
     return cleanFallback;
   }
 
-  // Otherwise, append the extension to the UI name
   return cleanFallback + ext;
+}
+
+/**
+ * Extract file extension directly from a URL's pathname.
+ */
+function getExtensionFromUrl(urlStr) {
+  try {
+    const urlObj = new URL(urlStr);
+    const pathParts = urlObj.pathname.split('/');
+    const lastPart = decodeURIComponent(pathParts[pathParts.length - 1]);
+
+    // Look for a standard file extension pattern at the end of the filename
+    const extMatch = lastPart.match(/\.([0-9a-z]+)$/i);
+    if (extMatch) {
+      return extMatch[0];
+    }
+  } catch {
+    // Return empty if URL is invalid or parsing fails
+  }
+  return '';
 }
 
 /**
@@ -366,7 +360,6 @@ function extractFilenameFromHeaders(response, fallbackName) {
 function resolveUrl(url, base) {
   if (!url) return '';
   try {
-    // Handle HTML entities in URLs
     url = url.replace(/&amp;/g, '&');
     return new URL(url, base).href;
   } catch {

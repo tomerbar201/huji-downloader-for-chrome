@@ -21,6 +21,13 @@
           <h1 id="header-title">Moodle Downloader</h1>
           <span class="header-badge" id="header-badge">HUJI</span>
         </div>
+        <button id="btn-my-courses" class="btn-hub" title="My Courses — view all scanned courses">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          <span>My Courses</span>
+        </button>
       </div>
     </header>
 
@@ -99,6 +106,34 @@
             <line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
           Download Selected
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════ -->
+    <!-- STATE: LIBRARY (My Courses)             -->
+    <!-- ═══════════════════════════════════════ -->
+    <div id="state-library" class="state-panel">
+      <div class="library-header">
+        <h2 class="library-title">My Courses</h2>
+        <span id="library-course-count" class="course-count-badge">0 courses</span>
+      </div>
+      
+      <div id="library-list" class="library-list">
+        <!-- Dynamically populated -->
+      </div>
+
+      <div id="library-empty" class="empty-state hidden">
+        <div class="empty-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+        </div>
+        <p class="empty-title">No Scanned Courses</p>
+        <p class="empty-desc">Courses you've visited and scanned will appear here for quick access.</p>
+        <button id="btn-library-go-moodle" class="btn btn-primary">
+          Go to Moodle
         </button>
       </div>
     </div>

@@ -148,6 +148,7 @@
   function parseCourseIndex() {
     const result = {
       courseName: extractCourseName(),
+      courseUrl: window.location.href,
       baseUrl: window.location.origin + window.location.pathname.replace(/\/[^/]*$/, ''),
       sections: [],
     };
