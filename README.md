@@ -11,7 +11,6 @@ A Chrome Extension for bulk downloading course materials from the HUJI Moodle pl
 
 ## Project Structure
 - `moodle-downloader-mv3/`: The main extension source code.
-- `examples/`: HTML snapshots of Moodle pages used for development and testing.
 
 ## Installation
 1. Clone this repository.
