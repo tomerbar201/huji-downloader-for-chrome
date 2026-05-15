@@ -1,7 +1,6 @@
 /**
  * popup.js — Popup UI Controller
- * 
- * Manages the full popup lifecycle:
+ * * Manages the full popup lifecycle:
  * 1. On open: inject content script, request course data.
  * 2. Render the section/item selection tree.
  * 3. Handle user selection (select all, individual checkboxes).
@@ -14,7 +13,7 @@
   'use strict';
 
   /* ═══════════════════════════════════════════════════════
-   *  DOM REFERENCES
+   * DOM REFERENCES
    * ═══════════════════════════════════════════════════════ */
 
   const $ = (id) => document.getElementById(id);
@@ -71,7 +70,7 @@
   const errorDesc = $('error-desc');
 
   /* ═══════════════════════════════════════════════════════
-   *  STATE
+   * STATE
    * ═══════════════════════════════════════════════════════ */
 
   let courseData = null;    // Parsed course data from content script
@@ -80,7 +79,7 @@
   let currentActiveState = 'loading';
 
   /* ═══════════════════════════════════════════════════════
-   *  INITIALIZATION
+   * INITIALIZATION
    * ═══════════════════════════════════════════════════════ */
 
   async function init() {
@@ -128,6 +127,9 @@
       } else {
         renderLibrary();
       }
+
+      // 5. Initialize Theme
+      initTheme();
     } catch (err) {
       console.error('[Popup] Critical Init Error:', err);
       showError('Initialization Error', 'The extension encountered an error while starting. Please try refreshing the page.');
@@ -166,9 +168,7 @@
       await sleep(200);
 
       // Request course data from content script
-      // 3. Send message to content script
       const response = await new Promise((resolve) => {
-        // Set a timeout in case the content script doesn't respond
         const timeout = setTimeout(() => {
           console.warn('[Popup] PARSE_COURSE message timed out');
           resolve({ success: false, error: 'TIMEOUT', message: 'The page is taking too long to respond. Try refreshing.' });
@@ -367,14 +367,12 @@
 
     if (targets.length === 0) return;
 
-    // הגדרת גודל המנה לסריקה מקבילית
     const CONCURRENCY_LIMIT = 5;
 
     for (let i = 0; i < targets.length; i += CONCURRENCY_LIMIT) {
       const batch = targets.slice(i, i + CONCURRENCY_LIMIT);
 
       try {
-        // שולחים את כל המנה לפענוח ברקע בבקשה אחת
         const response = await sendToBackground({
           action: 'RESOLVE_RESOURCES',
           payload: {
@@ -382,7 +380,6 @@
           }
         });
 
-        // ממפים את התשובות חזרה לפריטים במערך
         if (response.success && response.results) {
           response.results.forEach((res, index) => {
             const item = batch[index];
@@ -398,7 +395,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  EVENT BINDING
+   * EVENT BINDING
    * ═══════════════════════════════════════════════════════ */
 
   function bindEvents() {
@@ -504,15 +501,21 @@
         handleStateChange(message);
       }
     });
+
+    // Theme Toggle
+    const themeToggle = $('theme-toggle');
+    if (themeToggle) {
+      themeToggle.addEventListener('change', () => {
+        const isDark = themeToggle.checked;
+        setTheme(isDark);
+      });
+    }
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  DATA PROCESSING
+   * DATA PROCESSING
    * ═══════════════════════════════════════════════════════ */
 
-  /**
-   * Build a flat items list with unique IDs and section references.
-   */
   function buildItemsList() {
     allItems = [];
     let uid = 0;
@@ -525,19 +528,14 @@
           name: item.name,
           url: item.url,
           type: item.type,
-          subFiles: [],      // To be filled by sub-item scanning
-          scanningStatus: 'none', // 'none' | 'scanning' | 'done' | 'error'
+          subFiles: [],
+          scanningStatus: 'none',
         });
-        // Select all by default
         selectedIds.add(allItems[allItems.length - 1].uid);
       }
     }
   }
 
-  /**
-   * Scan folders and assignments for their internal files.
-   * Runs during the 'loading' state.
-   */
   async function scanSubItems() {
     const targets = allItems.filter(item =>
       (item.type === 'folder' || item.type === 'assign') && item.scanningStatus === 'none'
@@ -547,23 +545,18 @@
 
     const loadingText = stateLoading.querySelector('.loading-text');
     const originalText = loadingText ? loadingText.textContent : 'Scanning course…';
-
-    // הגדרת גודל מנה - כמה תיקיות נסרוק במקביל
     const CONCURRENCY_LIMIT = 5;
 
     for (let i = 0; i < targets.length; i += CONCURRENCY_LIMIT) {
-      // חותכים "מנה" מתוך המערך
       const batch = targets.slice(i, i + CONCURRENCY_LIMIT);
 
       if (loadingText) {
         loadingText.textContent = `Scanning items ${i + 1} to ${Math.min(i + CONCURRENCY_LIMIT, targets.length)} of ${targets.length}…`;
       }
 
-      // מסמנים את כולם כבסריקה
       batch.forEach(item => item.scanningStatus = 'scanning');
 
       try {
-        // שולחים את כל המנה בבקשה אחת ל-Service Worker
         const response = await sendToBackground({
           action: 'RESOLVE_RESOURCES',
           payload: {
@@ -572,7 +565,6 @@
         });
 
         if (response.success && response.results) {
-          // ממפים את התוצאות חזרה לפריטים
           response.results.forEach((res, index) => {
             const item = batch[index];
             if (res.type === 'folder' || res.type === 'assign') {
@@ -594,21 +586,15 @@
     if (loadingText) loadingText.textContent = originalText;
   }
 
-  /**
-   * Replace folder/assignment containers with their actual files.
-   * If a container is empty, it is removed.
-   */
   function flattenItems() {
     const newItems = [];
     let uid = 0;
 
     for (const item of allItems) {
       if (item.type === 'resource') {
-        // Keep direct files as is
         item.uid = uid++;
         newItems.push(item);
       } else if (item.type === 'folder' || item.type === 'assign') {
-        // Replace container with its files
         if (item.subFiles && item.subFiles.length > 0) {
           for (const subFile of item.subFiles) {
             newItems.push({
@@ -617,27 +603,22 @@
               sectionTitle: item.sectionTitle,
               name: subFile.name,
               url: subFile.url,
-              type: 'resource', // Treat as resource for UI purposes
-              parentFolder: item.name, // Preserve for path construction
+              type: 'resource',
+              parentFolder: item.name,
               alreadyDownloaded: false
             });
           }
         }
-        // If empty, it's naturally excluded from newItems
       }
     }
 
     allItems = newItems;
-    selectedIds = new Set(allItems.map(i => i.uid)); // Re-select all by default
+    selectedIds = new Set(allItems.map(i => i.uid));
   }
 
-  /**
-   * Check with the background script which items are already downloaded.
-   */
   async function enrichItemsWithStatus() {
     if (!courseData || allItems.length === 0) return;
 
-    // We only need to check items that are files (resource, folder, assign)
     const itemsToCheck = allItems.map(item => ({
       sectionTitle: item.sectionTitle,
       name: item.name,
@@ -656,7 +637,6 @@
       response.statuses.forEach((isDownloaded, index) => {
         allItems[index].alreadyDownloaded = isDownloaded;
         if (isDownloaded) {
-          // Unselect already downloaded items by default
           selectedIds.delete(allItems[index].uid);
         }
       });
@@ -664,7 +644,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  RENDERING
+   * RENDERING
    * ═══════════════════════════════════════════════════════ */
 
   function renderCourseInfo() {
@@ -771,23 +751,27 @@
           updateDownloadButton();
         });
 
+        // ✨ UX POLISH: Make the entire row clickable for better UX
+        row.addEventListener('click', (e) => {
+          // Prevent double-toggling if they actually clicked the checkbox label directly
+          if (e.target.closest('.item-checkbox-wrapper')) return;
+          
+          itemCb.checked = !itemCb.checked;
+          itemCb.dispatchEvent(new Event('change'));
+        });
+
         itemsContainer.appendChild(row);
       }
 
-      // Set initial max-height for animation
       group.appendChild(itemsContainer);
       sectionsList.appendChild(group);
 
-      // After append, set the max-height for CSS transitions
       requestAnimationFrame(() => {
         itemsContainer.style.maxHeight = itemsContainer.scrollHeight + 'px';
       });
     }
   }
 
-  /**
-   * Get an SVG icon for a module type.
-   */
   function getTypeIcon(type) {
     const icons = {
       resource: `<svg class="item-type-icon type-resource" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -811,19 +795,17 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  CHECKBOX SYNCHRONIZATION
+   * CHECKBOX SYNCHRONIZATION
    * ═══════════════════════════════════════════════════════ */
 
   function syncCheckboxes() {
     if (!courseData || !courseData.sections) return;
 
-    // Sync individual item checkboxes
     const itemCbs = sectionsList.querySelectorAll('input[data-uid]');
     for (const cb of itemCbs) {
       cb.checked = selectedIds.has(parseInt(cb.dataset.uid, 10));
     }
 
-    // Sync section checkboxes
     for (const section of courseData.sections) {
       const sectionItems = allItems.filter(i => i.sectionId === section.id);
       const sectionCb = sectionsList.querySelector(`input[data-section-id="${section.id}"]`);
@@ -842,7 +824,6 @@
       }
     }
 
-    // Sync select all
     if (selectedIds.size === 0) {
       selectAllCb.checked = false;
       selectAllCb.indeterminate = false;
@@ -864,7 +845,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  DOWNLOAD ACTIONS
+   * DOWNLOAD ACTIONS
    * ═══════════════════════════════════════════════════════ */
 
   async function startDownload() {
@@ -874,7 +855,6 @@
       try { await chrome.storage.session.remove('lastDownloadResult'); } catch (e) { }
     }
 
-    // Gather selected items
     const selectedItems = allItems
       .filter(item => selectedIds.has(item.uid))
       .map(item => ({
@@ -888,7 +868,6 @@
     showState('downloading');
     updateProgress(0, 0, selectedItems.length, 'Starting…', []);
 
-    // Send to service worker
     const response = await sendToBackground({
       action: 'START_DOWNLOAD',
       payload: {
@@ -910,7 +889,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  PROGRESS UPDATES
+   * PROGRESS UPDATES
    * ═══════════════════════════════════════════════════════ */
 
   function updateProgress(downloaded, skipped, total, currentFile, errors) {
@@ -928,7 +907,6 @@
     downloadTitle.textContent = 'Downloading…';
     downloadSubtitle.textContent = `${downloaded} downloaded, ${skipped} skipped`;
 
-    // Update errors
     if (errors && errors.length > 0) {
       errorsContainer.classList.remove('hidden');
       errorsCount.textContent = `${errors.length} issue${errors.length !== 1 ? 's' : ''}`;
@@ -945,7 +923,6 @@
           completeTitle.textContent = 'Download Complete!';
           completeDesc.textContent = `${message.downloaded} file${message.downloaded !== 1 ? 's' : ''} downloaded${message.skipped > 0 ? `, ${message.skipped} skipped` : ''}.`;
 
-          // Save course to history on success
           if (courseData) {
             saveCourseToHistory(
               courseData.courseName,
@@ -959,7 +936,6 @@
           completeDesc.textContent = `${message.downloaded} file${message.downloaded !== 1 ? 's' : ''} were downloaded before cancellation.`;
         }
 
-        // Show logs if there are any
         const successes = message.successes || [];
         const errors = message.errors || [];
 
@@ -986,12 +962,9 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  LIBRARY MANAGEMENT
+   * LIBRARY MANAGEMENT
    * ═══════════════════════════════════════════════════════ */
 
-  /**
-   * Fetch and render the list of previously scanned courses.
-   */
   async function renderLibrary() {
     showState('library');
     libraryList.innerHTML = '';
@@ -1012,61 +985,45 @@
       const card = document.createElement('div');
       card.className = 'mini-course-card';
 
-      const lastUpdateStr = new Date(course.lastUpdated).toLocaleDateString();
-
+      // ✨ UX POLISH: Compact List Row Template (Narrowed & Clickable)
       card.innerHTML = `
-        <div class="card-top">
-          <div class="library-course-icon">📘</div>
-          <div class="card-info">
-            <h3 class="card-title" dir="rtl">${escapeHtml(course.name)}</h3>
-            <span class="card-stats">${course.files} files • ${course.sections} sections • ${lastUpdateStr}</span>
-          </div>
+        <div class="card-info">
+          <h3 class="card-title" dir="rtl" title="${escapeHtml(course.name)}">${escapeHtml(course.name)}</h3>
+          <span class="card-stats">${course.files} files • ${course.sections} sections</span>
         </div>
         <div class="card-actions">
-          <button class="btn-card btn-card-primary btn-open-folder" data-course="${escapeHtml(course.name)}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <button class="btn-card btn-card-primary btn-card-large btn-open-folder" data-course="${escapeHtml(course.name)}" title="Open Download Folder">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
-            Open Folder
-          </button>
-          <button class="btn-card btn-open-moodle" data-url="${escapeHtml(course.url)}">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-              <polyline points="15 3 21 3 21 9"/>
-              <line x1="10" y1="14" x2="21" y2="3"/>
-            </svg>
-            Moodle
           </button>
         </div>
       `;
 
-      // Open Folder
-      card.querySelector('.btn-open-folder').addEventListener('click', () => {
-        sendToBackground({ action: 'OPEN_COURSE_FOLDER', payload: { courseName: course.name } });
-      });
-
-      // Open Moodle
-      card.querySelector('.btn-open-moodle').addEventListener('click', () => {
+      // Entire card opens Moodle
+      card.addEventListener('click', () => {
         if (course.url) {
           chrome.tabs.create({ url: course.url });
         } else {
-          // Fallback if no URL
           chrome.tabs.create({ url: 'https://moodle.huji.ac.il/' });
         }
+      });
+
+      // Folder button opens local folder (stopPropagation to prevent opening Moodle)
+      const btnFolder = card.querySelector('.btn-open-folder');
+      btnFolder.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sendToBackground({ action: 'OPEN_COURSE_FOLDER', payload: { courseName: course.name } });
       });
 
       libraryList.appendChild(card);
     });
   }
 
-  /**
-   * Save a course to the history list in local storage.
-   */
   async function saveCourseToHistory(courseName, courseUrl, filesCount, sectionsCount) {
     const result = await chrome.storage.local.get(['courseHistory']);
     let history = result.courseHistory || {};
 
-    // Update or add the course
     history[courseName] = {
       name: courseName,
       url: courseUrl,
@@ -1079,7 +1036,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  STATE MANAGEMENT
+   * STATE MANAGEMENT
    * ═══════════════════════════════════════════════════════ */
 
   function showState(name) {
@@ -1109,7 +1066,6 @@
       map[name].classList.add('active');
     }
 
-    // Update Header button text/icon based on state
     if (btnMyCourses) {
       const span = btnMyCourses.querySelector('span');
       const svg = btnMyCourses.querySelector('svg');
@@ -1117,16 +1073,15 @@
         if (name === 'library') {
           span.textContent = 'Back';
           btnMyCourses.title = 'Back to scan current page';
-          svg.innerHTML = '<polyline points="15 18 9 12 15 6"/>'; // Chevron left
+          svg.innerHTML = '<polyline points="15 18 9 12 15 6"/>';
         } else {
           span.textContent = 'My Courses';
           btnMyCourses.title = 'My Courses — view all scanned courses';
-          svg.innerHTML = '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'; // Home icon
+          svg.innerHTML = '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>';
         }
       }
     }
 
-    // Reset cancel button state
     if (name === 'downloading' && btnCancel) {
       btnCancel.disabled = false;
       btnCancel.innerHTML = `
@@ -1145,7 +1100,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  UTILITIES
+   * UTILITIES
    * ═══════════════════════════════════════════════════════ */
 
   function sendToBackground(message) {
@@ -1171,7 +1126,36 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  DATABASE (SWR CACHE)
+   * THEME MANAGEMENT
+   * ═══════════════════════════════════════════════════════ */
+
+  async function initTheme() {
+    const result = await chrome.storage.local.get(['darkMode']);
+    const isDark = result.darkMode !== undefined ? result.darkMode : false;
+    
+    const themeToggle = $('theme-toggle');
+    if (themeToggle) {
+      themeToggle.checked = isDark;
+    }
+    
+    if (isDark) {
+      document.body.classList.add('dark-mode');
+    } else {
+      document.body.classList.remove('dark-mode');
+    }
+  }
+
+  function setTheme(isDark) {
+    if (isDark) {
+      document.body.classList.add('dark-mode');
+    } else {
+      document.body.classList.remove('dark-mode');
+    }
+    chrome.storage.local.set({ darkMode: isDark });
+  }
+
+  /* ═══════════════════════════════════════════════════════
+   * DATABASE (SWR CACHE)
    * ═══════════════════════════════════════════════════════ */
 
   async function getCourseFromDB(courseName) {
@@ -1183,7 +1167,6 @@
   async function saveCourseToDB(courseName, itemsArray) {
     const key = `db_${courseName}`;
     const data = {};
-    // Save only essential metadata to optimize storage space
     data[key] = itemsArray.map(item => ({
       sectionId: item.sectionId,
       sectionTitle: item.sectionTitle,
@@ -1196,7 +1179,7 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   *  BOOTSTRAP
+   * BOOTSTRAP
    * ═══════════════════════════════════════════════════════ */
 
   init();
