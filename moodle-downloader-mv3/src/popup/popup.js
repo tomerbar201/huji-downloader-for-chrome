@@ -26,6 +26,12 @@
   const btnCancel = $('btn-cancel');
   const btnNewDownload = $('btn-new-download');
   const btnRetry = $('btn-retry');
+  const btnBack = $('btn-back');
+
+  const loadingText = $('loading-text');
+  const loadingProgressContainer = $('loading-progress-container');
+  const loadingProgressFill = $('loading-progress-fill');
+  const loadingProgressText = $('loading-progress-text');
 
   const courseNameEl = $('course-name');
   const courseItemCount = $('course-item-count');
@@ -239,6 +245,9 @@
       showState('loading');
       scanCurrentTab();
     });
+    btnBack.addEventListener('click', () => {
+      showState('invalid');
+    });
 
     toggleErrorsBtn.addEventListener('click', () => { $('errors-list').classList.toggle('hidden'); });
     if (toggleSuccessBtn) toggleSuccessBtn.addEventListener('click', () => { successList.classList.toggle('hidden'); });
@@ -275,7 +284,16 @@
 
   async function scanSubItems() {
     const targets = allItems.filter(item => (item.type === 'folder' || item.type === 'assign') && item.scanningStatus === 'none');
-    if (targets.length === 0) return;
+    if (targets.length === 0) {
+      loadingProgressContainer.classList.add('hidden');
+      return;
+    }
+
+    loadingText.textContent = 'Scanning folders…';
+    loadingProgressContainer.classList.remove('hidden');
+    loadingProgressFill.style.width = '0%';
+    loadingProgressText.textContent = `0 / ${targets.length}`;
+
     const CONCURRENCY_LIMIT = 5;
     for (let i = 0; i < targets.length; i += CONCURRENCY_LIMIT) {
       const batch = targets.slice(i, i + CONCURRENCY_LIMIT);
@@ -285,11 +303,28 @@
         if (response.success && response.results) {
           response.results.forEach((res, index) => {
             const item = batch[index];
-            if (res.type === 'folder' || res.type === 'assign') { item.subFiles = res.files || []; item.scanningStatus = 'done'; } else item.scanningStatus = 'error';
+            if (res.type === 'folder' || res.type === 'assign' || res.type === 'resolved' || res.type === 'direct') { 
+              item.subFiles = res.files || []; 
+              item.scanningStatus = 'done'; 
+            } else {
+              item.scanningStatus = 'error';
+            }
           });
-        } else batch.forEach(item => item.scanningStatus = 'error');
-      } catch (err) { batch.forEach(item => item.scanningStatus = 'error'); }
+        } else {
+          batch.forEach(item => item.scanningStatus = 'error');
+        }
+      } catch (err) { 
+        batch.forEach(item => item.scanningStatus = 'error'); 
+      }
+
+      // Update progress
+      const completed = i + batch.length;
+      const percent = Math.round((completed / targets.length) * 100);
+      loadingProgressFill.style.width = `${percent}%`;
+      loadingProgressText.textContent = `${completed} / ${targets.length}`;
     }
+    
+    loadingProgressContainer.classList.add('hidden');
   }
 
   function flattenItems() {
@@ -549,6 +584,13 @@
     
     const map = { loading: stateLoading, invalid: stateInvalid, selection: stateSelection, downloading: stateDownloading, complete: stateComplete, error: stateError };
     if (map[name]) map[name].classList.add('active');
+
+    // Manage Back Button visibility
+    if (name === 'selection' || name === 'loading' || name === 'downloading' || name === 'complete' || name === 'error') {
+      btnBack.classList.remove('hidden');
+    } else {
+      btnBack.classList.add('hidden');
+    }
   }
 
   function showError(title, description) { errorTitle.textContent = title; errorDesc.textContent = description; showState('error'); }

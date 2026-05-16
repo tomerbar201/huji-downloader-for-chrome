@@ -236,11 +236,16 @@ export async function resolveResource(url, itemName, itemType) {
       targetUrl += (targetUrl.includes('?') ? '&' : '?') + 'redirect=1';
     }
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
     const response = await fetch(targetUrl, {
       method: 'GET',
       credentials: 'include',
       redirect: 'follow',
+      signal: controller.signal,
     });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       if (response.status === 429) {
