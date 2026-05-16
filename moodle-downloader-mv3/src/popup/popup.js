@@ -17,7 +17,6 @@
   const stateDownloading = $('state-downloading');
   const stateComplete = $('state-complete');
   const stateError = $('state-error');
-  const stateLibrary = $('state-library');
 
   const btnGoMoodle = $('btn-go-moodle');
   const btnDownload = $('btn-download');
@@ -27,12 +26,6 @@
   const btnCancel = $('btn-cancel');
   const btnNewDownload = $('btn-new-download');
   const btnRetry = $('btn-retry');
-  const btnMyCourses = $('btn-my-courses');
-  const btnLibraryGoMoodle = $('btn-library-go-moodle');
-
-  const libraryList = $('library-list');
-  const libraryCourseCount = $('library-course-count');
-  const libraryEmpty = $('library-empty');
 
   const courseNameEl = $('course-name');
   const courseItemCount = $('course-item-count');
@@ -111,10 +104,9 @@
 
       if (isMoodle && tab) {
         showState('loading');
-        const isOnCoursePage = await scanCurrentTab(tab);
-        if (!isOnCoursePage) renderLibrary();
+        await scanCurrentTab(tab);
       } else {
-        renderLibrary();
+        showState('invalid');
       }
 
       initTheme();
@@ -165,96 +157,40 @@
         return true;
       }
 
-      const cachedItems = await getCourseFromDB(courseData.courseName);
-      if (cachedItems && cachedItems.length > 0) {
-        allItems = cachedItems;
-        let uid = 0;
-        allItems.forEach(item => { item.uid = uid++; });
-        selectedIds = new Set(allItems.map(i => i.uid));
-        await enrichItemsWithStatus();
-        renderCourseInfo();
-        renderSections();
-        showState('selection');
-        performGhostScan();
-      } else {
-        buildItemsList();
-        await scanSubItems();
-        flattenItems();
-        if (allItems.length === 0) {
-          showError('No Materials Found', 'This course page has no downloadable files.');
+      const cache = await getCourseFromDB(courseData.courseName);
+      if (cache && cache.items && cache.items.length > 0) {
+        // Simple cache check: if older than 7 days, ignore it
+        const ONE_WEEK = 7 * 24 * 60 * 60 * 1000;
+        if (Date.now() - cache.timestamp < ONE_WEEK) {
+          allItems = cache.items;
+          let uid = 0;
+          allItems.forEach(item => { item.uid = uid++; });
+          selectedIds = new Set(allItems.map(i => i.uid));
+          await enrichItemsWithStatus();
+          renderCourseInfo();
+          renderSections();
+          showState('selection');
           return true;
         }
-        await saveCourseToDB(courseData.courseName, allItems, courseData.courseUrl);
-        await enrichItemsWithStatus();
-        renderCourseInfo();
-        renderSections();
-        syncCheckboxes();
-        showState('selection');
       }
-      return true;
-    } catch (err) {
-      showError('Connection Error', 'Could not connect to the Moodle page.');
-      return false;
-    }
-  }
 
-  async function performGhostScan() {
-    const currentUrls = new Set(allItems.map(item => item.url));
-    let tempItems = [];
-    let tempUid = 0;
-    for (const section of courseData.sections) {
-      for (const item of section.items) {
-        tempItems.push({ uid: tempUid++, sectionId: section.id, sectionTitle: section.title, name: item.name, url: item.url, type: item.type, subFiles: [], scanningStatus: 'none' });
+      buildItemsList();
+      await scanSubItems();
+      flattenItems();
+      if (allItems.length === 0) {
+        showError('No Materials Found', 'This course page has no downloadable files.');
+        return true;
       }
-    }
-    await scanSubItemsForArray(tempItems);
-    const freshItems = [];
-    for (const item of tempItems) {
-      if (item.type === 'resource') freshItems.push(item);
-      else if ((item.type === 'folder' || item.type === 'assign') && item.subFiles) {
-        for (const subFile of item.subFiles) {
-          freshItems.push({ sectionId: item.sectionId, sectionTitle: item.sectionTitle, name: subFile.name, url: subFile.url, type: 'resource', parentFolder: item.name });
-        }
-      }
-    }
-    let foundNewFiles = false;
-    for (const freshItem of freshItems) {
-      if (!currentUrls.has(freshItem.url)) { foundNewFiles = true; break; }
-    }
-    if (foundNewFiles) {
-      const selectionMap = new Map();
-      allItems.forEach(item => selectionMap.set(item.url, selectedIds.has(item.uid)));
-      await saveCourseToDB(courseData.courseName, freshItems);
-      allItems = freshItems;
-      let newUid = 0;
-      selectedIds = new Set();
-      allItems.forEach(item => {
-        item.uid = newUid++;
-        if (selectionMap.has(item.url)) { if (selectionMap.get(item.url)) selectedIds.add(item.uid); }
-        else selectedIds.add(item.uid);
-      });
+      await saveCourseToDB(courseData.courseName, allItems, courseData.courseUrl);
       await enrichItemsWithStatus();
       renderCourseInfo();
       renderSections();
       syncCheckboxes();
-    }
-  }
-
-  async function scanSubItemsForArray(itemsArray) {
-    const targets = itemsArray.filter(item => (item.type === 'folder' || item.type === 'assign') && item.scanningStatus === 'none');
-    if (targets.length === 0) return;
-    const CONCURRENCY_LIMIT = 5;
-    for (let i = 0; i < targets.length; i += CONCURRENCY_LIMIT) {
-      const batch = targets.slice(i, i + CONCURRENCY_LIMIT);
-      try {
-        const response = await sendToBackground({ action: 'RESOLVE_RESOURCES', payload: { items: batch.map(item => ({ url: item.url, name: item.name, type: item.type })) } });
-        if (response.success && response.results) {
-          response.results.forEach((res, index) => {
-            const item = batch[index];
-            if (res.type === 'folder' || res.type === 'assign') item.subFiles = res.files || [];
-          });
-        }
-      } catch (err) { }
+      showState('selection');
+      return true;
+    } catch (err) {
+      showError('Connection Error', 'Could not connect to the Moodle page.');
+      return false;
     }
   }
 
@@ -264,18 +200,6 @@
 
   function bindEvents() {
     btnGoMoodle.addEventListener('click', () => { chrome.tabs.create({ url: 'https://moodle.huji.ac.il/2025-26/my/' }); window.close(); });
-    btnLibraryGoMoodle.addEventListener('click', () => { chrome.tabs.create({ url: 'https://moodle.huji.ac.il/2025-26/my/' }); window.close(); });
-
-    if (btnMyCourses) {
-      btnMyCourses.addEventListener('click', () => {
-        if (currentActiveState === 'library') {
-          showState('loading');
-          scanCurrentTab().then(found => { if (!found) renderLibrary(); });
-        } else {
-          renderLibrary();
-        }
-      });
-    }
 
     selectAllCb.addEventListener('change', () => {
       const isChecked = selectAllCb.checked;
@@ -607,7 +531,6 @@
         } else {
           completeLogs.classList.add('hidden');
         }
-        syncHistoryWithDB();
         break;
       case 'SESSION_EXPIRED':
         showError('Session Expired', 'Your Moodle session has expired. Please refresh the Moodle page, log in, and try again.');
@@ -616,120 +539,16 @@
   }
 
   /* ═══════════════════════════════════════════════════════
-   * LIBRARY MANAGEMENT
-   * ═══════════════════════════════════════════════════════ */
-
-  async function renderLibrary() {
-    showState('library');
-    libraryList.innerHTML = '';
-    libraryEmpty.classList.add('hidden');
-    
-    // Auto-sync with DB before rendering
-    await syncHistoryWithDB();
-    
-    const result = await chrome.storage.local.get(['courseHistory']);
-    const history = result.courseHistory || {};
-    const courses = Object.values(history).sort((a, b) => b.lastUpdated - a.lastUpdated);
-    libraryCourseCount.textContent = `${courses.length} course${courses.length !== 1 ? 's' : ''}`;
-
-    if (courses.length === 0) { libraryEmpty.classList.remove('hidden'); return; }
-
-    courses.forEach(course => {
-      const card = document.createElement('div');
-      card.className = 'mini-course-card';
-      card.innerHTML = `
-        <div class="card-info" style="flex:1; overflow:hidden;">
-          <div class="card-title" dir="auto" title="${escapeHtml(course.name)}">${escapeHtml(course.name)}</div>
-          <span class="card-stats">${course.files} files • ${course.sections} sections</span>
-        </div>
-        <button class="btn-delete" title="Remove from Library">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-        </button>
-      `;
-
-      card.querySelector('.card-info').addEventListener('click', () => { chrome.tabs.create({ url: course.url || 'https://moodle.huji.ac.il/' }); });
-      
-      card.querySelector('.btn-delete').addEventListener('click', async (e) => {
-        e.stopPropagation();
-        if (confirm(`Remove "${course.name}" from library? This will also clear its cache.`)) {
-          await removeCourse(course.name);
-          renderLibrary();
-        }
-      });
-
-      libraryList.appendChild(card);
-    });
-  }
-
-  async function syncHistoryWithDB() {
-    const all = await chrome.storage.local.get(null);
-    let history = all.courseHistory || {};
-    let changed = false;
-
-    // 1. Add/Update from DB keys
-    for (const key in all) {
-      if (key.startsWith('db_')) {
-        const courseName = key.substring(3);
-        const items = all[key] || [];
-        const sectionCount = new Set(items.map(i => i.sectionId)).size;
-        
-        if (!history[courseName]) {
-          history[courseName] = {
-            name: courseName,
-            url: all[`url_${courseName}`] || 'https://moodle.huji.ac.il/',
-            files: items.length,
-            sections: sectionCount,
-            lastUpdated: Date.now()
-          };
-          changed = true;
-        } else {
-          // Update stats if needed
-          if (history[courseName].files !== items.length || history[courseName].sections !== sectionCount) {
-            history[courseName].files = items.length;
-            history[courseName].sections = sectionCount;
-            changed = true;
-          }
-        }
-      }
-    }
-
-    // 2. Remove orphaned history entries
-    for (const courseName in history) {
-      if (!all[`db_${courseName}`]) {
-        delete history[courseName];
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      await chrome.storage.local.set({ courseHistory: history });
-    }
-  }
-
-  async function removeCourse(courseName) {
-    await chrome.storage.local.remove([`db_${courseName}`, `url_${courseName}`]);
-    // The next renderLibrary call will sync and remove it from history
-  }
-
-  /* ═══════════════════════════════════════════════════════
    * STATE MANAGEMENT & UTILS
    * ═══════════════════════════════════════════════════════ */
 
   function showState(name) {
     currentActiveState = name;
-    const panels = [stateLoading, stateInvalid, stateSelection, stateDownloading, stateComplete, stateError, stateLibrary];
+    const panels = [stateLoading, stateInvalid, stateSelection, stateDownloading, stateComplete, stateError];
     for (const p of panels) { if (p && p.classList) p.classList.remove('active'); }
     
-    const map = { loading: stateLoading, invalid: stateInvalid, selection: stateSelection, downloading: stateDownloading, complete: stateComplete, error: stateError, library: stateLibrary };
+    const map = { loading: stateLoading, invalid: stateInvalid, selection: stateSelection, downloading: stateDownloading, complete: stateComplete, error: stateError };
     if (map[name]) map[name].classList.add('active');
-
-    if (btnMyCourses) {
-      const span = btnMyCourses.querySelector('span');
-      if (span) {
-        if (name === 'library') { span.textContent = 'Back'; } 
-        else { span.textContent = 'My Courses'; }
-      }
-    }
   }
 
   function showError(title, description) { errorTitle.textContent = title; errorDesc.textContent = description; showState('error'); }
@@ -755,14 +574,18 @@
   }
 
   async function getCourseFromDB(courseName) {
-    const key = `db_${courseName}`;
+    const key = `db_v2_${courseName}`;
     const result = await chrome.storage.local.get(key);
     return result[key] || null;
   }
 
   async function saveCourseToDB(courseName, itemsArray, courseUrl = null) {
-    const key = `db_${courseName}`; const data = {};
-    data[key] = itemsArray.map(item => ({ sectionId: item.sectionId, sectionTitle: item.sectionTitle, name: item.name, url: item.url, type: item.type, parentFolder: item.parentFolder }));
+    const key = `db_v2_${courseName}`;
+    const data = {};
+    data[key] = {
+      timestamp: Date.now(),
+      items: itemsArray.map(item => ({ sectionId: item.sectionId, sectionTitle: item.sectionTitle, name: item.name, url: item.url, type: item.type, parentFolder: item.parentFolder }))
+    };
     if (courseUrl) data[`url_${courseName}`] = courseUrl;
     await chrome.storage.local.set(data);
   }

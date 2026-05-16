@@ -18,6 +18,17 @@
     <!-- ═══════════════════════════════════════ -->
     <header id="header">
       <div style="display: flex; align-items: center; gap: 8px;">
+        <button id="btn-back" class="btn-hub hidden">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+          My Courses
+        </button>
+        <div id="header-title" class="header-title">Huji Moodler</div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 8px;">
         <input type="checkbox" id="theme-toggle">
         <label for="theme-toggle" class="theme-toggle-label" title="Toggle Dark/Light Mode">
           <svg class="sun-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -38,11 +49,7 @@
           </svg>
           <span class="toggle-slider"></span>
         </label>
-        <div id="header-title" class="header-title">Huji Moodler</div>
       </div>
-      <button id="btn-my-courses" class="btn-hub" title="My Courses — view all scanned courses">
-        <span>My Courses</span>
-      </button>
     </header>
 
     <!-- ═══════════════════════════════════════ -->
@@ -50,7 +57,15 @@
     <!-- ═══════════════════════════════════════ -->
     <div id="state-loading" class="state-panel active">
       <div class="loading-spinner"></div>
-      <p class="loading-text">Scanning course page…</p>
+      <p class="loading-text" id="loading-text">Scanning course page…</p>
+      <div id="loading-progress-container" class="progress-container hidden" style="width: 200px; margin-top: 10px;">
+        <div class="progress-bar">
+          <div id="loading-progress-fill" class="progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="progress-stats">
+          <span id="loading-progress-text">0/0 folders</span>
+        </div>
+      </div>
     </div>
 
     <!-- ═══════════════════════════════════════ -->
@@ -138,28 +153,7 @@
       </div>
     </div>
 
-    <!-- ═══════════════════════════════════════ -->
-    <!-- STATE: LIBRARY (My Courses)             -->
-    <!-- ═══════════════════════════════════════ -->
-    <div id="state-library" class="state-panel">
-      <div class="library-header">
-        <h2 class="library-title">My Courses</h2>
-        <span id="library-course-count" class="course-count-badge">0 courses</span>
-      </div>
-      <div id="library-list" class="library-list"></div>
-      <div id="library-empty" class="empty-state hidden">
-        <div class="empty-icon">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
-            stroke-linecap="round" stroke-linejoin="round">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-          </svg>
-        </div>
-        <p class="empty-title">No Scanned Courses</p>
-        <p class="empty-desc">Courses you've visited and scanned will appear here for quick access.</p>
-        <button id="btn-library-go-moodle" class="btn btn-primary">Go to Moodle</button>
-      </div>
-    </div>
+
 
     <!-- ═══════════════════════════════════════ -->
     <!-- STATE 4: DOWNLOADING                    -->

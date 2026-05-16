@@ -73,46 +73,73 @@ function isLoginPage(html) {
  * Strategy 3: Find forcedownload links
  */
 function extractFileUrlFromHtml(html, baseUrl) {
-  // Strategy 1: iframe with id="resourceobject"
-  const iframeRegex = /<iframe[^>]+id\s*=\s*["']resourceobject["'][^>]+src\s*=\s*["']([^"']+)["']/i;
-  const iframeMatch = html.match(iframeRegex);
-  if (iframeMatch && iframeMatch[1]) {
-    return resolveUrl(decodeHtmlEntities(iframeMatch[1]), baseUrl);
+  let rawUrl = null;
+
+  // 1. Look for <iframe id="resourceobject" ...> or <object id="resourceobject" ...>
+  // This is Moodle's standard way to embed the primary document (PDF, MS Office)
+  const resourceObjectRegex = /<(?:iframe|object)[^>]+id\s*=\s*["']resourceobject["'][^>]+(?:src|data)\s*=\s*["']([^"']+)["']/i;
+  const roMatch = html.match(resourceObjectRegex);
+  if (roMatch && roMatch[1]) {
+    rawUrl = decodeHtmlEntities(roMatch[1]);
   }
 
-  // Also try: src before id
-  const iframeRegex2 = /<iframe[^>]+src\s*=\s*["']([^"']+)["'][^>]+id\s*=\s*["']resourceobject["']/i;
-  const iframeMatch2 = html.match(iframeRegex2);
-  if (iframeMatch2 && iframeMatch2[1]) {
-    return resolveUrl(decodeHtmlEntities(iframeMatch2[1]), baseUrl);
+  // 2. Look for forcedownload link inside Moodle's "resourceworkaround" div (fallback link)
+  if (!rawUrl) {
+    const workaroundRegex = /<div[^>]+class\s*=\s*["'][^"']*resourceworkaround[^"']*["'][^>]*>\s*<a[^>]+href\s*=\s*["']([^"']+)["']/i;
+    const waMatch = html.match(workaroundRegex);
+    if (waMatch && waMatch[1]) {
+      rawUrl = decodeHtmlEntities(waMatch[1]);
+    }
   }
 
-  // Strategy 2: Look for <object> tag with data attribute containing pluginfile.php
-  const objectRegex = /<object[^>]+data\s*=\s*["']([^"']*pluginfile\.php[^"']*)["']/i;
-  const objectMatch = html.match(objectRegex);
-  if (objectMatch && objectMatch[1]) {
-    return resolveUrl(decodeHtmlEntities(objectMatch[1]), baseUrl);
+  // 3. Look for ANY link containing both pluginfile.php AND forcedownload=1
+  if (!rawUrl) {
+    const forceDownloadRegex = /(?:href|src|data)\s*=\s*["']([^"']*pluginfile\.php[^"']*forcedownload=[^"']*)["']/i;
+    const fdMatch = html.match(forceDownloadRegex);
+    if (fdMatch && fdMatch[1]) {
+      rawUrl = decodeHtmlEntities(fdMatch[1]);
+    }
   }
 
-  // Strategy 3: Look for <embed> tag with src containing pluginfile.php
-  const embedRegex = /<embed[^>]+src\s*=\s*["']([^"']*pluginfile\.php[^"']*)["']/i;
-  const embedMatch = html.match(embedRegex);
-  if (embedMatch && embedMatch[1]) {
-    return resolveUrl(decodeHtmlEntities(embedMatch[1]), baseUrl);
+  // 4. Look for the first pluginfile.php link that is NOT a theme or user image
+  if (!rawUrl) {
+    const anyRegex = /(?:href|src|data)\s*=\s*["']([^"']*pluginfile\.php[^"']*)["']/gi;
+    let match;
+    while ((match = anyRegex.exec(html)) !== null) {
+      const candidate = decodeHtmlEntities(match[1]);
+      // Skip avatars, icons, themes, javascript etc.
+      if (candidate.includes('/theme/') ||
+        candidate.includes('/user/icon/') ||
+        candidate.includes('/image/') ||
+        candidate.includes('.js') ||
+        candidate.includes('.css')) {
+        continue;
+      }
+      rawUrl = candidate;
+      break;
+    }
   }
 
-  // Strategy 4: Any <a> link with pluginfile.php and forcedownload
-  const forceDownloadRegex = /<a[^>]+href\s*=\s*["']([^"']*pluginfile\.php[^"']*forcedownload[^"']*)["']/gi;
-  const fdMatch = forceDownloadRegex.exec(html);
-  if (fdMatch && fdMatch[1]) {
-    return resolveUrl(decodeHtmlEntities(fdMatch[1]), baseUrl);
-  }
+  if (rawUrl) {
+    // Check if the URL is wrapped by Microsoft Office Online Viewer
+    if (rawUrl.includes('view.officeapps.live.com')) {
+      try {
+        const urlObj = new URL(rawUrl);
+        const srcParam = urlObj.searchParams.get('src');
+        if (srcParam) {
+          rawUrl = srcParam;
+        }
+      } catch (e) {
+        // Fallback if parsing fails
+      }
+    }
 
-  // Strategy 5: Any <a> link containing pluginfile.php (generic fallback)
-  const pluginfileRegex = /<a[^>]+href\s*=\s*["']([^"']*pluginfile\.php[^"']*)["']/gi;
-  const pfMatch = pluginfileRegex.exec(html);
-  if (pfMatch && pfMatch[1]) {
-    return resolveUrl(decodeHtmlEntities(pfMatch[1]), baseUrl);
+    // Ensure forcedownload=1 is present to bypass Moodle page rendering
+    if (rawUrl.includes('pluginfile.php') && !rawUrl.includes('forcedownload=1')) {
+      rawUrl += (rawUrl.includes('?') ? '&' : '?') + 'forcedownload=1';
+    }
+
+    return resolveUrl(rawUrl, baseUrl);
   }
 
   return null;
@@ -128,8 +155,20 @@ function extractFolderFiles(html, baseUrl) {
   const regex = /<a[^>]+href\s*=\s*["']([^"']*pluginfile\.php[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
   while ((match = regex.exec(html)) !== null) {
-    const rawUrl = decodeHtmlEntities(match[1]);
+    let rawUrl = decodeHtmlEntities(match[1]);
     const rawName = match[2].replace(/<[^>]*>/g, '').trim();
+
+    if (rawUrl.includes('view.officeapps.live.com')) {
+      try {
+        const urlObj = new URL(rawUrl);
+        const srcParam = urlObj.searchParams.get('src');
+        if (srcParam) rawUrl = srcParam;
+      } catch (e) { }
+    }
+
+    if (!rawUrl.includes('forcedownload=1')) {
+      rawUrl += (rawUrl.includes('?') ? '&' : '?') + 'forcedownload=1';
+    }
 
     const absoluteUrl = resolveUrl(rawUrl, baseUrl);
 
@@ -154,8 +193,20 @@ function extractAssignmentFiles(html, baseUrl) {
   const regex = /<a[^>]+href\s*=\s*["']([^"']*pluginfile\.php[^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match;
   while ((match = regex.exec(html)) !== null) {
-    const rawUrl = decodeHtmlEntities(match[1]);
+    let rawUrl = decodeHtmlEntities(match[1]);
     const rawName = match[2].replace(/<[^>]*>/g, '').trim();
+
+    if (rawUrl.includes('view.officeapps.live.com')) {
+      try {
+        const urlObj = new URL(rawUrl);
+        const srcParam = urlObj.searchParams.get('src');
+        if (srcParam) rawUrl = srcParam;
+      } catch (e) { }
+    }
+
+    if (!rawUrl.includes('forcedownload=1')) {
+      rawUrl += (rawUrl.includes('?') ? '&' : '?') + 'forcedownload=1';
+    }
 
     const absoluteUrl = resolveUrl(rawUrl, baseUrl);
 
@@ -179,7 +230,13 @@ function extractAssignmentFiles(html, baseUrl) {
  */
 export async function resolveResource(url, itemName, itemType) {
   try {
-    const response = await fetch(url, {
+    // Strategy: Bypass Moodle's viewer wrapper completely for 'resource' types
+    let targetUrl = url;
+    if (itemType === 'resource' && targetUrl.includes('/mod/resource/view.php')) {
+      targetUrl += (targetUrl.includes('?') ? '&' : '?') + 'redirect=1';
+    }
+
+    const response = await fetch(targetUrl, {
       method: 'GET',
       credentials: 'include',
       redirect: 'follow',
@@ -202,6 +259,32 @@ export async function resolveResource(url, itemName, itemType) {
         files: [{ name: fileName, url: response.url }],
         error: null,
       };
+    }
+
+    // Check if we were redirected to Microsoft Office Online Viewer
+    if (response.url.includes('view.officeapps.live.com')) {
+      try {
+        const urlObj = new URL(response.url);
+        const srcParam = urlObj.searchParams.get('src');
+        if (srcParam) {
+          let directUrl = srcParam;
+          if (directUrl.includes('pluginfile.php') && !directUrl.includes('forcedownload=1')) {
+            directUrl += (directUrl.includes('?') ? '&' : '?') + 'forcedownload=1';
+          }
+          let finalName = sanitizeFilename(itemName);
+          const ext = getExtensionFromUrl(directUrl);
+          if (ext && !finalName.toLowerCase().endsWith(ext.toLowerCase())) {
+            finalName += ext;
+          }
+          return {
+            type: 'resolved',
+            files: [{ name: finalName, url: directUrl }],
+            error: null,
+          };
+        }
+      } catch (e) {
+        // Fallback
+      }
     }
 
     // It's HTML — parse it
@@ -308,9 +391,22 @@ function extractFilenameFromHeaders(response, fallbackName) {
   if (!serverFilename) {
     try {
       const urlObj = new URL(response.url);
-      const pathParts = urlObj.pathname.split('/');
-      serverFilename = decodeURIComponent(pathParts[pathParts.length - 1]);
+
+      // If Moodle uses ?file=/path/to/realfile.pdf, extract from there instead of pluginfile.php
+      const fileParam = urlObj.searchParams.get('file');
+      if (fileParam) {
+        const fileParts = fileParam.split('/');
+        serverFilename = decodeURIComponent(fileParts[fileParts.length - 1]);
+      } else {
+        const pathParts = urlObj.pathname.split('/');
+        serverFilename = decodeURIComponent(pathParts[pathParts.length - 1]);
+      }
     } catch { /* fall through */ }
+  }
+
+  // Never use pluginfile.php as the actual file name
+  if (serverFilename === 'pluginfile.php') {
+    serverFilename = '';
   }
 
   let ext = '';
@@ -340,8 +436,17 @@ function extractFilenameFromHeaders(response, fallbackName) {
 function getExtensionFromUrl(urlStr) {
   try {
     const urlObj = new URL(urlStr);
-    const pathParts = urlObj.pathname.split('/');
+
+    let targetString = urlObj.pathname;
+    const fileParam = urlObj.searchParams.get('file');
+    if (fileParam) {
+      targetString = fileParam;
+    }
+
+    const pathParts = targetString.split('/');
     const lastPart = decodeURIComponent(pathParts[pathParts.length - 1]);
+
+    if (lastPart === 'pluginfile.php') return '';
 
     // Look for a standard file extension pattern at the end of the filename
     const extMatch = lastPart.match(/\.([0-9a-z]+)$/i);
